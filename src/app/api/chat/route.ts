@@ -11,6 +11,11 @@ import {
   getRecommendedProducts,
 } from '@/lib/knowledge-service'
 import type { IntentType } from '@/lib/intent-classifier'
+import { parseVariantNotation, canRunAcmgPipeline, formatVcfString } from '@/lib/variant-parser'
+import { annotateWithVep, annotateWithVepByRsid } from '@/lib/api-clients/vep-client'
+import { queryClinVarByPosition, queryClinVarByRsid, queryGnomadByPosition } from '@/lib/api-clients/clinvar-client'
+import { classifyVariant } from '@/lib/acmg'
+import type { GnomadData, VepConsequence, ClinVarData, ClassificationResult } from '@/lib/acmg/types'
 
 /**
  * POST /api/chat
@@ -89,23 +94,246 @@ export async function POST(request: NextRequest) {
     try {
       switch (intent) {
         case 'variant_interpretation': {
-          // Search for genes and diseases related to the variant
           const extractedGene = intentResult.extractedData?.geneSymbol
+          const variantNotation = intentResult.extractedData?.variantNotation
           const parts: string[] = []
 
-          if (extractedGene) {
-            const genes = await searchGenes(extractedGene)
-            if (genes.length > 0) {
-              parts.push(`## 基因信息\n${genes.map((g) => `- ${g.geneSymbol}: ${g.fullName ?? ''} ${g.description ?? ''}`).join('\n')}`)
+          // Parse variant notation to determine query strategy
+          const parsed = parseVariantNotation(variantNotation, userContent)
+
+          // Declare at case-block scope for later KB search reference
+          let vepResult: { annotation: any; vep: VepConsequence; gnomad: GnomadData } | null = null
+
+          if (canRunAcmgPipeline(parsed)) {
+            // ===== Full ACMG Pipeline (VCF or rsID format) =====
+            console.log(`[ACMG Pipeline] Starting full pipeline for variant: ${JSON.stringify(parsed)}`)
+
+            let clinvarData: ClinVarData | null = null
+            let gnomadData: GnomadData | null = null
+            let classificationResult: ClassificationResult | null = null
+
+            try {
+              // Step 1: VEP Annotation (includes basic gnomAD frequency)
+              if (parsed.format === 'rsid' && parsed.rsid) {
+                console.log(`[ACMG Pipeline] Calling VEP by rsID: ${parsed.rsid}`)
+                vepResult = await annotateWithVepByRsid(parsed.rsid)
+              } else if (parsed.format === 'vcf' && parsed.chrom && parsed.pos && parsed.ref && parsed.alt) {
+                console.log(`[ACMG Pipeline] Calling VEP by position: ${formatVcfString(parsed.chrom, parsed.pos, parsed.ref, parsed.alt)}`)
+                vepResult = await annotateWithVep(parsed.chrom, parsed.pos, parsed.ref, parsed.alt)
+              }
+
+              if (vepResult) {
+                const { annotation, vep } = vepResult
+                const chrom = annotation.chromosome
+                const pos = annotation.position
+                const ref = annotation.reference
+                const alt = annotation.alternate
+
+                // Build VEP annotation context
+                parts.push(`## VEP 变异注释
+- **基因**: ${annotation.gene || '未知'}
+- **染色体**: ${chrom}
+- **位置**: ${pos}
+- **参考/替换**: ${ref} → ${alt}
+- **转录本**: ${annotation.refseqTranscript || annotation.transcript || '未知'} (${annotation.maneStatus || ''})
+- **HGVS cDNA**: ${annotation.hgvsC || '未知'}
+- **HGVS 蛋白**: ${annotation.hgvsP || '未知'}
+- **变异后果**: ${annotation.consequence || '未知'} (${annotation.impact || ''})
+- **rsID**: ${annotation.rsId || '无'}
+${vep.siftScore !== undefined ? `- **SIFT 分数**: ${vep.siftScore.toFixed(3)}` : ''}
+${vep.polyphenScore !== undefined ? `- **PolyPhen 分数**: ${vep.polyphenScore.toFixed(3)}` : ''}
+${vep.caddScore !== undefined ? `- **CADD 分数**: ${vep.caddScore.toFixed(1)}` : ''}
+${vep.revelScore !== undefined ? `- **REVEL 分数**: ${vep.revelScore.toFixed(3)}` : ''}
+${vep.spliceAiDsMax !== undefined ? `- **SpliceAI DSmax**: ${vep.spliceAiDsMax.toFixed(3)}` : ''}
+${vep.loftee ? `- **LOFTEE**: ${vep.loftee}` : ''}`.trim())
+
+                // Step 2: ClinVar query (parallel with gnomAD)
+              }
+
+              // Run ClinVar and gnomAD queries in parallel
+              const apiPromises: Promise<void>[] = []
+
+              if (vepResult) {
+                // ClinVar query
+                if (parsed.format === 'rsid' && parsed.rsid) {
+                  apiPromises.push(
+                    queryClinVarByRsid(parsed.rsid).then((data) => { clinvarData = data }).catch(() => { /* non-fatal */ })
+                  )
+                } else if (parsed.format === 'vcf' && parsed.chrom && parsed.pos && parsed.ref && parsed.alt) {
+                  apiPromises.push(
+                    queryClinVarByPosition(parsed.chrom, parsed.pos, parsed.ref, parsed.alt).then((data) => { clinvarData = data }).catch(() => { /* non-fatal */ })
+                  )
+                }
+
+                // gnomAD query (supplementary data)
+                apiPromises.push(
+                  queryGnomadByPosition(
+                    vepResult.annotation.chromosome,
+                    vepResult.annotation.position,
+                    vepResult.annotation.reference,
+                    vepResult.annotation.alternate,
+                  ).then((data) => { gnomadData = data }).catch(() => { /* non-fatal */ })
+                )
+              }
+
+              await Promise.allSettled(apiPromises)
+
+              // Build ClinVar context
+              if (clinvarData) {
+                const clinvarParts = [`## ClinVar 临床意义
+- **变异 ID**: ${clinvarData.variationId || '未知'}`]
+                if (clinvarData.clinicalSignificance) {
+                  clinvarParts.push(`- **临床意义**: ${clinvarData.clinicalSignificance}`)
+                }
+                if (clinvarData.reviewStatus) {
+                  clinvarParts.push(`- **审核状态**: ${clinvarData.reviewStatus}`)
+                }
+                if (clinvarData.lastEvaluated) {
+                  clinvarParts.push(`- **最后审核**: ${clinvarData.lastEvaluated}`)
+                }
+                if (clinvarData.diseases && clinvarData.diseases.length > 0) {
+                  clinvarParts.push(`- **相关疾病**: ${clinvarData.diseases.join('、')}`)
+                }
+                parts.push(clinvarParts.join('\n'))
+              } else {
+                parts.push('## ClinVar 临床意义\n该变异在 ClinVar 数据库中未找到记录。')
+              }
+
+              // Build gnomAD context (merge VEP gnomAD + direct gnomAD data)
+              const mergedGnomad: GnomadData = {
+                ...vepResult?.gnomad,
+              }
+              if (gnomadData) {
+                // Direct gnomAD data may be more complete, use it to supplement
+                if (gnomadData.homCount !== undefined) mergedGnomad.homCount = gnomadData.homCount
+                if (gnomadData.hemiCount !== undefined) mergedGnomad.hemiCount = gnomadData.hemiCount
+                // Prefer direct gnomAD frequencies if VEP didn't provide them
+                if (gnomadData.afGlobal !== undefined && !mergedGnomad.afGlobal) mergedGnomad.afGlobal = gnomadData.afGlobal
+                if (gnomadData.popmaxFreq !== undefined && !mergedGnomad.popmaxFreq) mergedGnomad.popmaxFreq = gnomadData.popmaxFreq
+                if (gnomadData.popmaxPop && !mergedGnomad.popmaxPop) mergedGnomad.popmaxPop = gnomadData.popmaxPop
+              }
+
+              const gnomadParts = ['## gnomAD 人群频率']
+              if (mergedGnomad.afGlobal !== undefined) {
+                gnomadParts.push(`- **全球等位基因频率 (AF)**: ${mergedGnomad.afGlobal < 0.0001 ? mergedGnomad.afGlobal.toExponential(2) : mergedGnomad.afGlobal.toFixed(6)}`)
+              } else {
+                gnomadParts.push('- **全球等位基因频率 (AF)**: 未在 gnomAD 数据库中找到')
+              }
+              if (mergedGnomad.popmaxFreq !== undefined) {
+                gnomadParts.push(`- **Popmax 频率**: ${mergedGnomad.popmaxFreq < 0.0001 ? mergedGnomad.popmaxFreq.toExponential(2) : mergedGnomad.popmaxFreq.toFixed(6)} (${mergedGnomad.popmaxPop || ''})`)
+              }
+              if (mergedGnomad.afEas !== undefined) {
+                gnomadParts.push(`- **东亚 (EAS) 频率**: ${mergedGnomad.afEas < 0.0001 ? mergedGnomad.afEas.toExponential(2) : mergedGnomad.afEas.toFixed(6)}`)
+              }
+              if (mergedGnomad.homCount !== undefined) {
+                gnomadParts.push(`- **纯合子数**: ${mergedGnomad.homCount}`)
+              }
+              if (mergedGnomad.hemiCount !== undefined) {
+                gnomadParts.push(`- **半合子数**: ${mergedGnomad.hemiCount}`)
+              }
+              parts.push(gnomadParts.join('\n'))
+
+              // Step 3: Run ACMG Classification
+              if (vepResult) {
+                console.log('[ACMG Pipeline] Running ACMG classifier...')
+                classificationResult = await classifyVariant(
+                  vepResult.annotation,
+                  clinvarData || undefined,
+                  Object.keys(mergedGnomad).length > 0 ? mergedGnomad : undefined,
+                  undefined, // HGMD not available in chat flow
+                  vepResult.vep,
+                )
+
+                console.log(`[ACMG Pipeline] Classification: ${classificationResult.classification} (${classificationResult.classificationLabel})`)
+
+                // Build ACMG classification context
+                const acmgParts = [`## ACMG 致病性分类结果
+- **分类**: ${classificationResult.classification} (${classificationResult.classificationLabel})`]
+
+                const appliedRules = classificationResult.ruleResults.filter(r => r.applied)
+                const pathogenicRules = appliedRules.filter(r => r.evidenceType === 'pathogenic')
+                const benignRules = appliedRules.filter(r => r.evidenceType === 'benign')
+
+                if (pathogenicRules.length > 0) {
+                  acmgParts.push(`- **致病性证据 (已应用 ${pathogenicRules.length} 条):`)
+                  for (const rule of pathogenicRules) {
+                    acmgParts.push(`  - ${rule.rule} [${rule.strength}]: ${rule.comment}`)
+                  }
+                  acmgParts.push('')
+                }
+                if (benignRules.length > 0) {
+                  acmgParts.push(`- **良性证据 (已应用 ${benignRules.length} 条):`)
+                  for (const rule of benignRules) {
+                    acmgParts.push(`  - ${rule.rule} [${rule.strength}]: ${rule.comment}`)
+                  }
+                  acmgParts.push('')
+                }
+
+                const summary = classificationResult.evidenceSummary
+                acmgParts.push('- **证据汇总**:')
+                if (summary.pathogenicVeryStrong > 0) acmgParts.push(`  - 致病性极强证据: ${summary.pathogenicVeryStrong}`)
+                if (summary.pathogenicStrong > 0) acmgParts.push(`  - 致病性强证据: ${summary.pathogenicStrong}`)
+                if (summary.pathogenicModerate > 0) acmgParts.push(`  - 致病性中等证据: ${summary.pathogenicModerate}`)
+                if (summary.pathogenicSupporting > 0) acmgParts.push(`  - 致病性支持证据: ${summary.pathogenicSupporting}`)
+                if (summary.benignStandAlone > 0) acmgParts.push(`  - 良性独立证据: ${summary.benignStandAlone}`)
+                if (summary.benignStrong > 0) acmgParts.push(`  - 良性强证据: ${summary.benignStrong}`)
+                if (summary.benignModerate > 0) acmgParts.push(`  - 良性中等证据: ${summary.benignModerate}`)
+                if (summary.benignSupporting > 0) acmgParts.push(`  - 良性支持证据: ${summary.benignSupporting}`)
+
+                parts.push(acmgParts.join('\n'))
+
+                // Set comprehensive metadata
+                metadata = {
+                  gene: vepResult.annotation.gene || extractedGene,
+                  variant: vepResult.annotation.rsId || formatVcfString(vepResult.annotation.chromosome, vepResult.annotation.position, vepResult.annotation.reference, vepResult.annotation.alternate),
+                  hgvsC: vepResult.annotation.hgvsC,
+                  hgvsP: vepResult.annotation.hgvsP,
+                  acmgClassification: classificationResult.classification,
+                  acmgClassificationLabel: classificationResult.classificationLabel,
+                  clinvarSignificance: clinvarData?.clinicalSignificance,
+                  gnomadFrequency: mergedGnomad.afGlobal ?? 0,
+                  appliedRules: appliedRules.map(r => r.rule),
+                  evidenceSummary: classificationResult.evidenceSummary,
+                  consequence: vepResult.annotation.consequence,
+                  impact: vepResult.annotation.impact,
+                }
+              }
+            } catch (acmgError) {
+              console.error('[ACMG Pipeline] Pipeline failed, falling back to KB mode:', acmgError)
+              // Fall through to knowledge base search below
             }
-            const diseases = await searchDiseases(extractedGene)
+          } else if (parsed.format === 'hgvs') {
+            // HGVS-only format: cannot resolve genomic position, LLM-only mode
+            console.log(`[ACMG Pipeline] HGVS-only format detected (${parsed.hgvs}), using LLM-only mode`)
+            parts.push(`## 变异信息（HGVS 格式）
+- **HGVS 表示**: ${parsed.hgvs}
+- **注意**: 仅提供 HGVS 格式，无法自动获取基因组坐标，因此未执行完整的 ACMG 自动分类流程。
+- **基因**: ${parsed.geneSymbol || extractedGene || '未指定'}`)
+          } else {
+            console.log('[ACMG Pipeline] No parseable variant detected, using KB-only mode')
+          }
+
+          // Always include knowledge base gene/disease info as supplementary context
+          const geneForKbSearch = vepResult?.annotation?.gene || parsed.geneSymbol || extractedGene
+          if (geneForKbSearch) {
+            const genes = await searchGenes(geneForKbSearch)
+            if (genes.length > 0) {
+              // Only add if not already added from VEP
+              if (!parts.some(p => p.includes('## 基因信息'))) {
+                parts.push(`## 基因信息（知识库）\n${genes.map((g) => `- ${g.geneSymbol}: ${g.fullName ?? ''} ${g.description ?? ''}`).join('\n')}`)
+              }
+            }
+            const diseases = await searchDiseases(geneForKbSearch)
             if (diseases.length > 0) {
-              parts.push(`## 相关疾病\n${diseases.slice(0, 5).map((d) => `- ${d.name} (${d.omimId ?? '无OMIM ID'}): ${d.description ?? ''}`).join('\n')}`)
+              // Only add if not already added from VEP
+              if (!parts.some(p => p.includes('## 相关疾病'))) {
+                parts.push(`## 相关疾病\n${diseases.slice(0, 5).map((d) => `- ${d.name} (${d.omimId ?? '无OMIM ID'}): ${d.description ?? ''}`).join('\n')}`)
+              }
             }
           }
 
           knowledgeContext = parts.length > 0
-            ? `以下是与用户查询相关的知识库信息，请在回答时参考：\n\n${parts.join('\n\n')}`
+            ? `以下是通过多源数据整合获取的变异解读信息，请在此基础上为用户提供专业、全面的变异致病性解读：\n\n${parts.join('\n\n')}`
             : ''
 
           break

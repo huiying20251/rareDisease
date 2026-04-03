@@ -131,6 +131,7 @@ async function getLocalPm1Domains(gene: string): Promise<Pm1DomainData[]> {
       gene: d.gene,
       domainName: d.domainName,
       domainSource: d.domainSource,
+      domainId: d.domainId || undefined,
       startPos: d.startPos,
       endPos: d.endPos,
       criticalRegion: d.criticalRegion,

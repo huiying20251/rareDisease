@@ -139,6 +139,7 @@ export interface Pm1DomainData {
   gene: string
   domainName: string
   domainSource: string
+  domainId?: string
   startPos: number
   endPos: number
   criticalRegion: boolean

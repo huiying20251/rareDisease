@@ -64,4 +64,7 @@ db/*.db-journal
 .zscripts/
 
 # Upload scripts
-/upload/
+/upload/agent-ctx/
+dev.log
+*.db
+data/

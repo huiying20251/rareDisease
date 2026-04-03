@@ -104,54 +104,217 @@ function TextContent({ content }: { content: string }) {
 
 // ==================== Variant Interpretation ====================
 
+const ACMG_CLASS_COLORS: Record<string, string> = {
+  'Pathogenic': 'bg-red-500 text-white',
+  'Likely Pathogenic': 'bg-orange-500 text-white',
+  'VUS': 'bg-yellow-400 text-yellow-900',
+  'Likely Benign': 'bg-emerald-400 text-white',
+  'Benign': 'bg-emerald-600 text-white',
+}
+
+const ACMG_CLASS_BG: Record<string, string> = {
+  'Pathogenic': 'bg-red-50 border-red-200',
+  'Likely Pathogenic': 'bg-orange-50 border-orange-200',
+  'VUS': 'bg-yellow-50 border-yellow-200',
+  'Likely Benign': 'bg-emerald-50 border-emerald-200',
+  'Benign': 'bg-emerald-50 border-emerald-200',
+}
+
+const STRENGTH_BADGE_COLORS: Record<string, string> = {
+  very_strong: 'bg-red-100 text-red-800',
+  strong: 'bg-orange-100 text-orange-800',
+  moderate: 'bg-yellow-100 text-yellow-800',
+  supporting: 'bg-blue-100 text-blue-800',
+}
+
+const STRENGTH_LABELS: Record<string, string> = {
+  very_strong: '极强',
+  strong: '强',
+  moderate: '中等',
+  supporting: '支持',
+}
+
 function VariantInterpretationCard({ metadata }: { metadata: Record<string, any> }) {
   const gene = metadata.gene || ''
   const variant = metadata.variant || ''
-  const classification = metadata.classification || ''
-  const evidenceLevel = metadata.evidenceLevel || ''
+  const classification = metadata.acmgClassification || metadata.classification || ''
+  const classLabel = metadata.acmgClassificationLabel || ''
+  const hgvsC = metadata.hgvsC || ''
+  const hgvsP = metadata.hgvsP || ''
+  const clinvarSig = metadata.clinvarSignificance || ''
+  const gnomadFreq = metadata.gnomadFrequency
+  const appliedRules = metadata.appliedRules as string[] | undefined
+  const evidenceSummary = metadata.evidenceSummary as Record<string, number> | undefined
+  const consequence = metadata.consequence || ''
+  const impact = metadata.impact || ''
+
+  // Old metadata format fields
+  const oldEvidenceLevel = metadata.evidenceLevel || ''
   const details = metadata.details || ''
 
-  if (!gene && !variant && !classification) return null
+  const hasNewFormat = !!(metadata.acmgClassification || metadata.appliedRules)
+  const hasContent = !!(gene || variant || classification || hasNewFormat)
+
+  if (!hasContent) return null
+
+  const classBgColor = ACMG_CLASS_BG[classification] || 'bg-gray-50 border-gray-200'
+  const classTextColor = ACMG_CLASS_COLORS[classification] || 'bg-gray-500 text-white'
 
   return (
-    <div className="mt-3 rounded-lg border border-brand/20 bg-brand-light/50 p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <ShieldAlert className="size-4 text-brand-dark" />
-        <span className="text-sm font-semibold">ACMG 致病性评级</span>
-      </div>
-      <div className="grid grid-cols-1 gap-2">
-        {(gene || variant) && (
-          <div className="flex items-center justify-between rounded-md bg-background p-2.5">
-            <span className="text-sm text-muted-foreground">变异位点</span>
-            <span className="text-sm font-medium font-mono">
-              {gene}{gene && variant ? ' ' : ''}{variant}
-            </span>
+    <div className="mt-3 space-y-3">
+      {/* ACMG Classification Header */}
+      {classification && (
+        <div className={cn('rounded-lg border p-3.5', classBgColor)}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className="size-4 text-foreground/80" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className={cn('px-2.5 py-0.5 rounded-md text-sm font-bold', classTextColor)}>
+                    {classification}
+                  </span>
+                  {classLabel && (
+                    <span className="text-sm font-medium text-foreground/80">{classLabel}</span>
+                  )}
+                </div>
+                {(gene || hgvsC) && (
+                  <p className="text-xs text-foreground/60 mt-0.5">
+                    {gene}{gene && hgvsC ? ' · ' : ''}{hgvsC}{hgvsC && hgvsP ? ' / ' : ''}{hgvsP}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-        {classification && (
-          <div className="flex items-center justify-between rounded-md bg-background p-2.5">
-            <span className="text-sm text-muted-foreground">评级结果</span>
-            <Badge className={getClassificationColor(classification)}>
-              {classification}
+        </div>
+      )}
+
+      {/* Database info grid */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* ClinVar */}
+        {clinvarSig && (
+          <div className="rounded-md bg-background border p-2.5">
+            <p className="text-[10px] text-muted-foreground mb-1">ClinVar</p>
+            <Badge className={cn('text-[11px]', getClassificationColor(clinvarSig))}>
+              {clinvarSig}
             </Badge>
           </div>
         )}
-        {evidenceLevel && (
-          <div className="flex items-center justify-between rounded-md bg-background p-2.5">
-            <span className="text-sm text-muted-foreground">证据等级</span>
-            <Badge
-              variant="outline"
-              className="border-amber-400 text-amber-700"
-            >
-              {evidenceLevel}
-            </Badge>
+        {/* gnomAD */}
+        {gnomadFreq !== undefined && gnomadFreq !== null && (
+          <div className="rounded-md bg-background border p-2.5">
+            <p className="text-[10px] text-muted-foreground mb-1">gnomAD AF</p>
+            <p className="text-xs font-mono font-medium">
+              {gnomadFreq === 0 ? '0' : gnomadFreq < 0.0001 ? gnomadFreq.toExponential(2) : gnomadFreq.toFixed(6)}
+            </p>
+          </div>
+        )}
+        {/* Consequence */}
+        {consequence && (
+          <div className="rounded-md bg-background border p-2.5">
+            <p className="text-[10px] text-muted-foreground mb-1">变异类型</p>
+            <p className="text-xs font-mono font-medium truncate">{consequence}</p>
+          </div>
+        )}
+        {/* Impact */}
+        {impact && (
+          <div className="rounded-md bg-background border p-2.5">
+            <p className="text-[10px] text-muted-foreground mb-1">影响等级</p>
+            <p className="text-xs font-mono font-medium">{impact}</p>
           </div>
         )}
       </div>
-      {details && (
-        <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-          {details}
-        </p>
+
+      {/* Applied ACMG Rules */}
+      {appliedRules && appliedRules.length > 0 && (
+        <div className="rounded-lg border border-brand/20 bg-brand-light/30 p-3">
+          <p className="text-[10px] text-muted-foreground mb-2 flex items-center gap-1">
+            <ShieldAlert className="size-3" />
+            已应用的 ACMG 规则
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {appliedRules.map((rule) => {
+              // Determine badge style from rule prefix
+              const strength = rule.startsWith('PVS') ? 'very_strong'
+                : rule.startsWith('PS') ? 'strong'
+                : rule.startsWith('PM') ? 'moderate'
+                : rule.startsWith('PP') ? 'supporting'
+                : rule.startsWith('BA') ? 'stand_alone'
+                : rule.startsWith('BS') ? 'strong'
+                : 'supporting'
+              return (
+                <Badge
+                  key={rule}
+                  variant="outline"
+                  className={cn('text-[11px] font-mono font-medium', STRENGTH_BADGE_COLORS[strength])}
+                >
+                  {rule}
+                </Badge>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Evidence Summary */}
+      {evidenceSummary && (
+        <div className="rounded-md bg-background border p-3">
+          <p className="text-[10px] text-muted-foreground mb-2">证据汇总</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            {evidenceSummary.pathogenicVeryStrong > 0 && (
+              <p>致病·极强: <span className="font-bold text-red-600">{evidenceSummary.pathogenicVeryStrong}</span></p>
+            )}
+            {evidenceSummary.pathogenicStrong > 0 && (
+              <p>致病·强: <span className="font-bold text-orange-600">{evidenceSummary.pathogenicStrong}</span></p>
+            )}
+            {evidenceSummary.pathogenicModerate > 0 && (
+              <p>致病·中等: <span className="font-bold text-yellow-600">{evidenceSummary.pathogenicModerate}</span></p>
+            )}
+            {evidenceSummary.pathogenicSupporting > 0 && (
+              <p>致病·支持: <span className="font-bold text-blue-600">{evidenceSummary.pathogenicSupporting}</span></p>
+            )}
+            {evidenceSummary.benignStandAlone > 0 && (
+              <p>良性·独立: <span className="font-bold text-emerald-600">{evidenceSummary.benignStandAlone}</span></p>
+            )}
+            {evidenceSummary.benignStrong > 0 && (
+              <p>良性·强: <span className="font-bold text-emerald-600">{evidenceSummary.benignStrong}</span></p>
+            )}
+            {evidenceSummary.benignModerate > 0 && (
+              <p>良性·中等: <span className="font-bold text-emerald-500">{evidenceSummary.benignModerate}</span></p>
+            )}
+            {evidenceSummary.benignSupporting > 0 && (
+              <p>良性·支持: <span className="font-bold text-emerald-400">{evidenceSummary.benignSupporting}</span></p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Legacy: old format fields */}
+      {!hasNewFormat && (
+        <>
+          {(gene || variant) && !classification && (
+            <div className="rounded-lg border border-brand/20 bg-brand-light/50 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldAlert className="size-4 text-brand-dark" />
+                <span className="text-sm font-semibold">ACMG 致病性评级</span>
+              </div>
+              <div className="rounded-md bg-background p-2.5">
+                <span className="text-sm text-muted-foreground">变异位点: </span>
+                <span className="text-sm font-medium font-mono">
+                  {gene}{gene && variant ? ' ' : ''}{variant}
+                </span>
+              </div>
+            </div>
+          )}
+          {oldEvidenceLevel && (
+            <div className="rounded-md bg-background border p-2.5">
+              <span className="text-sm text-muted-foreground">证据等级: </span>
+              <Badge variant="outline" className="border-amber-400 text-amber-700">{oldEvidenceLevel}</Badge>
+            </div>
+          )}
+          {details && (
+            <p className="text-xs text-muted-foreground leading-relaxed">{details}</p>
+          )}
+        </>
       )}
     </div>
   )

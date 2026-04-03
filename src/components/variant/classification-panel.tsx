@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
+  Settings,
 } from 'lucide-react'
 
 // ==================== 类型定义 ====================
@@ -129,6 +130,8 @@ const STRENGTH_LABELS: Record<string, string> = {
   supporting: '支持',
 }
 
+import { DatasourceConfigPanel } from './datasource-config-panel'
+
 // ==================== 主组件 ====================
 
 export function VariantClassificationPanel() {
@@ -138,6 +141,7 @@ export function VariantClassificationPanel() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [expandedRule, setExpandedRule] = useState<string | null>(null)
+  const [showDsConfig, setShowDsConfig] = useState(false)
 
   const examples = [
     { label: 'BRCA1 c.5266dupC', type: 'vcf', value: '17:43045678:G:A' },
@@ -418,6 +422,29 @@ export function VariantClassificationPanel() {
           </Card>
         </div>
       )}
+
+      {/* 数据源配置折叠区域 */}
+      <Card>
+        <button
+          className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors rounded-t-lg"
+          onClick={() => setShowDsConfig(!showDsConfig)}
+        >
+          <div className="flex items-center gap-2">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">数据源配置</span>
+          </div>
+          {showDsConfig ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+        {showDsConfig && (
+          <CardContent className="pt-0 pb-4 px-4">
+            <DatasourceConfigPanel />
+          </CardContent>
+        )}
+      </Card>
     </div>
   )
 }

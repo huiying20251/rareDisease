@@ -5,6 +5,9 @@ async function main() {
 
   // ==================== 清理旧数据 ====================
   console.log('🗑️  清理旧数据...')
+  await db.acmgThreshold.deleteMany()
+  await db.pm1Domain.deleteMany()
+  await db.dataSourceConfig.deleteMany()
   await db.disease.deleteMany()
   await db.gene.deleteMany()
   await db.hpoTerm.deleteMany()
@@ -1158,6 +1161,335 @@ async function main() {
 
   console.log(`✅ 已创建 ${diseases.count} 个疾病\n`)
 
+  // ==================== 5. ACMG 阈值配置 ====================
+  console.log('⚙️ 填充ACMG阈值配置...')
+
+  const acmgThresholds = await db.acmgThreshold.createMany({
+    data: [
+      // 全局默认阈值 (gene=null)
+      {
+        gene: null,
+        thresholdBa1: 0.05,
+        thresholdBa1Absolute: 20,
+        thresholdBs1: 0.0001,
+        thresholdBs1Absolute: 5,
+        thresholdBs1Supporting: 0.00001,
+        thresholdBs2: 0.001,
+        thresholdBs2Supporting: 0.0001,
+        thresholdPm2: 0.00001,
+        thresholdPm2Supporting: true,
+        thresholdRevelPathogenic: 0.732,
+        thresholdRevelBenign: 0.16,
+        thresholdSpliceAiPathogenic: 0.2,
+        thresholdSpliceAiBenign: 0.01,
+        thresholdProteinLenDiff: 0.1,
+      },
+      // BRCA1: 高外显率肿瘤基因，更严格的阈值
+      {
+        gene: 'BRCA1',
+        thresholdBa1: 0.001,
+        thresholdBa1Absolute: 5,
+        thresholdBs1: 0.00005,
+        thresholdBs1Absolute: 2,
+        thresholdBs1Supporting: 0.000005,
+        thresholdBs2: 0.0005,
+        thresholdBs2Supporting: 0.00005,
+        thresholdPm2: 0.000005,
+        thresholdPm2Supporting: true,
+        thresholdRevelPathogenic: 0.732,
+        thresholdRevelBenign: 0.16,
+        thresholdSpliceAiPathogenic: 0.2,
+        thresholdSpliceAiBenign: 0.01,
+        thresholdProteinLenDiff: 0.1,
+      },
+      // TP53: Li-Fraumeni综合征，最严格的阈值
+      {
+        gene: 'TP53',
+        thresholdBa1: 0.0001,
+        thresholdBa1Absolute: 2,
+        thresholdBs1: 0.00001,
+        thresholdBs1Absolute: 1,
+        thresholdBs1Supporting: 0.000001,
+        thresholdBs2: 0.0001,
+        thresholdBs2Supporting: 0.00001,
+        thresholdPm2: 0.000001,
+        thresholdPm2Supporting: true,
+        thresholdRevelPathogenic: 0.732,
+        thresholdRevelBenign: 0.16,
+        thresholdSpliceAiPathogenic: 0.2,
+        thresholdSpliceAiBenign: 0.01,
+        thresholdProteinLenDiff: 0.1,
+      },
+      // DMD: X连锁隐性遗传，严格阈值
+      {
+        gene: 'DMD',
+        thresholdBa1: 0.001,
+        thresholdBa1Absolute: 5,
+        thresholdBs1: 0.00005,
+        thresholdBs1Absolute: 2,
+        thresholdBs1Supporting: 0.000005,
+        thresholdBs2: 0.0005,
+        thresholdBs2Supporting: 0.00005,
+        thresholdPm2: 0.000005,
+        thresholdPm2Supporting: true,
+        thresholdRevelPathogenic: 0.732,
+        thresholdRevelBenign: 0.16,
+        thresholdSpliceAiPathogenic: 0.2,
+        thresholdSpliceAiBenign: 0.01,
+        thresholdProteinLenDiff: 0.1,
+      },
+      // CFTR: CF相对常见，阈值较宽松
+      {
+        gene: 'CFTR',
+        thresholdBa1: 0.01,
+        thresholdBa1Absolute: 50,
+        thresholdBs1: 0.0005,
+        thresholdBs1Absolute: 10,
+        thresholdBs1Supporting: 0.00005,
+        thresholdBs2: 0.005,
+        thresholdBs2Supporting: 0.0005,
+        thresholdPm2: 0.0001,
+        thresholdPm2Supporting: true,
+        thresholdRevelPathogenic: 0.732,
+        thresholdRevelBenign: 0.16,
+        thresholdSpliceAiPathogenic: 0.2,
+        thresholdSpliceAiBenign: 0.01,
+        thresholdProteinLenDiff: 0.1,
+      },
+    ],
+  })
+
+  console.log(`✅ 已创建 ${acmgThresholds.count} 个ACMG阈值配置\n`)
+
+  // ==================== 6. PM1 关键功能域数据库 ====================
+  console.log('🔬 填充PM1功能域数据...')
+
+  const pm1Domains = await db.pm1Domain.createMany({
+    data: [
+      // BRCA1
+      {
+        gene: 'BRCA1',
+        domainName: 'RING domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00653',
+        startPos: 1,
+        endPos: 109,
+        criticalRegion: false,
+        description: 'BRCA1 RING结构域，介导与BARD1的异二聚化，参与E3泛素连接酶活性',
+        evidence: JSON.stringify(['ClinVar pathogenic variants enriched', 'Functional studies support']),
+      },
+      {
+        gene: 'BRCA1',
+        domainName: 'BRCT domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00533',
+        startPos: 1646,
+        endPos: 1859,
+        criticalRegion: true,
+        description: 'BRCA1 C端BRCT结构域，识别磷酸化蛋白，DNA损伤修复关键区域',
+        evidence: JSON.stringify(['ClinVar pathogenic variants highly enriched', 'Multiple functional studies', 'Hotspot for pathogenic missense variants']),
+      },
+      // BRCA2
+      {
+        gene: 'BRCA2',
+        domainName: 'DNA-binding domain',
+        domainSource: 'Pfam',
+        domainId: 'PF09036',
+        startPos: 2480,
+        endPos: 3185,
+        criticalRegion: true,
+        description: 'BRCA2 DNA结合结构域，包含OB1/OB2/OB3折叠和Tower结构域，介导同源重组修复',
+        evidence: JSON.stringify(['ClinVar pathogenic variants highly enriched', 'Structural studies support']),
+      },
+      // TP53
+      {
+        gene: 'TP53',
+        domainName: 'DNA-binding domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00270',
+        startPos: 102,
+        endPos: 292,
+        criticalRegion: true,
+        description: 'TP53核心DNA结合结构域，肿瘤突变热点区域，约80%致病突变集中于此',
+        evidence: JSON.stringify(['IARC TP53 Database hotspot', 'ClinVar pathogenic variants highly enriched', 'Functional studies extensively validated']),
+      },
+      {
+        gene: 'TP53',
+        domainName: 'Tetramerization domain',
+        domainSource: 'Pfam',
+        domainId: 'PF07710',
+        startPos: 323,
+        endPos: 356,
+        criticalRegion: false,
+        description: 'TP53四聚化结构域，介导p53蛋白的四聚化组装，对转录因子活性至关重要',
+        evidence: JSON.stringify(['Structural studies support', 'Known pathogenic variants in this region']),
+      },
+      // DMD
+      {
+        gene: 'DMD',
+        domainName: 'Actin-binding domain',
+        domainSource: 'UniProt',
+        domainId: 'PROSITE-PS50071',
+        startPos: 1,
+        endPos: 240,
+        criticalRegion: false,
+        description: 'Dystrophin N端肌动蛋白结合结构域，连接细胞骨架肌动蛋白',
+        evidence: JSON.stringify(['UniProt annotation', 'Functional studies']),
+      },
+      {
+        gene: 'DMD',
+        domainName: 'Rod domain',
+        domainSource: 'UniProt',
+        domainId: 'PROSITE-PS50204',
+        startPos: 363,
+        endPos: 3662,
+        criticalRegion: false,
+        description: 'Dystrophin杆状结构域，由24个血影蛋白样重复序列组成，提供分子柔性',
+        evidence: JSON.stringify(['UniProt annotation', 'Structural characterization']),
+      },
+      {
+        gene: 'DMD',
+        domainName: 'C-terminal domain',
+        domainSource: 'UniProt',
+        domainId: 'PROSITE-PS50204',
+        startPos: 3663,
+        endPos: 3866,
+        criticalRegion: false,
+        description: 'Dystrophin C端结构域，包含富含半胱氨酸的结构域，与 dystroglycan 复合物结合',
+        evidence: JSON.stringify(['UniProt annotation', 'Functional studies']),
+      },
+      // NF1
+      {
+        gene: 'NF1',
+        domainName: 'GAP-related domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00146',
+        startPos: 1198,
+        endPos: 1530,
+        criticalRegion: true,
+        description: 'NF1 GAP相关结构域（GRD），具有RAS-GTP酶激活蛋白活性，是NF1的核心功能区域',
+        evidence: JSON.stringify(['ClinVar pathogenic variants enriched', 'Functional studies support', 'Core functional domain']),
+      },
+      // MYH7
+      {
+        gene: 'MYH7',
+        domainName: 'Motor domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00063',
+        startPos: 178,
+        endPos: 779,
+        criticalRegion: true,
+        description: 'MYH7肌球蛋白马达结构域，包含ATP酶活性和肌动蛋白结合位点，HCM/DCM突变热点',
+        evidence: JSON.stringify(['ClinVar pathogenic variants highly enriched', 'HCM/DCM hotspot region', 'Functional studies extensively validated']),
+      },
+      // LMNA
+      {
+        gene: 'LMNA',
+        domainName: 'Rod domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00356',
+        startPos: 23,
+        endPos: 382,
+        criticalRegion: false,
+        description: 'LMNA杆状结构域，由多个heptad重复序列组成，介导核纤层蛋白二聚体化',
+        evidence: JSON.stringify(['Structural characterization', 'Known pathogenic variants']),
+      },
+      {
+        gene: 'LMNA',
+        domainName: 'Ig-fold domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00356',
+        startPos: 392,
+        endPos: 553,
+        criticalRegion: false,
+        description: 'LMNA免疫球蛋白样折叠结构域，参与核纤层蛋白与核膜蛋白的相互作用',
+        evidence: JSON.stringify(['Structural characterization', 'Known pathogenic variants']),
+      },
+      // TSC1
+      {
+        gene: 'TSC1',
+        domainName: 'Coiled-coil domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00038',
+        startPos: 719,
+        endPos: 998,
+        criticalRegion: false,
+        description: 'TSC1卷曲螺旋结构域，介导与TSC2的蛋白-蛋白相互作用',
+        evidence: JSON.stringify(['Protein interaction studies', 'Structural characterization']),
+      },
+      // TSC2
+      {
+        gene: 'TSC2',
+        domainName: 'GAP domain',
+        domainSource: 'Pfam',
+        domainId: 'PF00146',
+        startPos: 1517,
+        endPos: 1673,
+        criticalRegion: true,
+        description: 'TSC2 GAP结构域，具有Rheb-GTP酶激活蛋白活性，负调控mTORC1信号通路',
+        evidence: JSON.stringify(['ClinVar pathogenic variants enriched', 'Core functional domain', 'mTOR pathway regulation']),
+      },
+    ],
+  })
+
+  console.log(`✅ 已创建 ${pm1Domains.count} 个PM1功能域\n`)
+
+  // ==================== 7. 数据源配置 ====================
+  console.log('🌐 填充数据源配置...')
+
+  const dataSourceConfigs = await db.dataSourceConfig.createMany({
+    data: [
+      {
+        name: 'vep_api',
+        sourceType: 'api',
+        enabled: true,
+        config: JSON.stringify({
+          baseUrl: 'https://rest.ensembl.org',
+          species: 'human',
+          timeout: 30000,
+        }),
+        description: 'Ensembl VEP (Variant Effect Predictor) - 变异注释',
+      },
+      {
+        name: 'clinvar_api',
+        sourceType: 'api',
+        enabled: true,
+        config: JSON.stringify({
+          baseUrl: 'https://api.ncbi.nlm.nih.gov/clinvar',
+          eutilsUrl: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils',
+          rateLimit: 3,
+        }),
+        description: 'NCBI ClinVar - 变异临床意义数据库',
+      },
+      {
+        name: 'gnomad_api',
+        sourceType: 'api',
+        enabled: true,
+        config: JSON.stringify({
+          baseUrl: 'https://gnomad.broadinstitute.org/api',
+          dataset: 'gnomad_r4',
+        }),
+        description: 'gnomAD - 人群等位基因频率数据库',
+      },
+      {
+        name: 'hgmd_local',
+        sourceType: 'local_db',
+        enabled: false,
+        config: JSON.stringify({}),
+        description: 'HGMD 本地数据库 - 人类基因突变数据库',
+      },
+      {
+        name: 'pm1_local',
+        sourceType: 'local_db',
+        enabled: true,
+        config: JSON.stringify({}),
+        description: 'PM1 关键功能域本地数据库',
+      },
+    ],
+  })
+
+  console.log(`✅ 已创建 ${dataSourceConfigs.count} 个数据源配置\n`)
+
   // ==================== 汇总 ====================
   console.log('═'.repeat(50))
   console.log('🎉 种子数据填充完成！')
@@ -1166,6 +1498,9 @@ async function main() {
   console.log(`  🧬 HPO词条数量: ${hpoTerms.count}`)
   console.log(`  🧪 基因数量: ${genes.count}`)
   console.log(`  🏥 疾病数量: ${diseases.count}`)
+  console.log(`  ⚙️ ACMG阈值: ${acmgThresholds.count}`)
+  console.log(`  🔬 PM1功能域: ${pm1Domains.count}`)
+  console.log(`  🌐 数据源配置: ${dataSourceConfigs.count}`)
   console.log('═'.repeat(50))
 }
 

@@ -292,3 +292,158 @@ Stage Summary:
 - 提供了可配置的 ACMG 阈值系统（支持按基因自定义）
 - 前端组件支持 VCF/rsID 两种输入格式
 - ESLint 零错误通过
+
+---
+## Task ID: 7 - ACMG Classification Engine Integration into Chat System
+### Work Task
+Integrate the ACMG classification engine into the chat system so that when users send variant interpretation queries, the system calls real bioinformatics APIs (VEP, ClinVar, gnomAD) and runs the ACMG classifier, rather than just doing a simple knowledge base search.
+
+### Work Summary
+
+**Files Created (1):**
+
+1. **`src/lib/variant-parser.ts`** — Variant format parsing utility
+   - `ParsedVariant` interface with fields: format, chrom, pos, ref, alt, rsid, hgvs, geneSymbol
+   - `parseVariantNotation(notation, userMessage)`: Parses variant notation into structured format
+     - Supports VCF colon format: `chr17:43045678:G:A`, `17:43045678:G:A`
+     - Supports VCF arrow format: `17:43045678G>A`
+     - Supports rsID format: `rs80357713`
+     - Supports HGVS format: `c.5266dupC`, `BRCA1:c.5266dupC`, `p.(Gln1756ProfsTer74)`
+     - Falls back to scanning user message for rsID or VCF patterns if notation alone is HGVS
+   - `canRunAcmgPipeline(parsed)`: Returns true only for VCF or rsID formats (which have genomic coordinates)
+   - `formatVcfString(chrom, pos, ref, alt)`: Builds display string for logging/metadata
+   - `normalizeChrom()`: Standardizes chromosome names (chr17 → 17, mt → MT)
+   - `extractGeneFromMessage()`: Tries to extract gene symbol from full message text
+
+**Files Modified (2):**
+
+2. **`src/app/api/chat/route.ts`** — Major upgrade to variant_interpretation case
+   - Added imports: variant-parser, vep-client, clinvar-client, acmg classifier
+   - **VCF/rsID pipeline** (full ACMG):
+     1. VEP annotation via `annotateWithVep` or `annotateWithVepByRsid`
+     2. ClinVar + gnomAD queries in parallel via `Promise.allSettled`
+     3. Merges gnomAD data from VEP and direct gnomAD API
+     4. Runs `classifyVariant` with VEP annotation, ClinVar, gnomAD, VEP consequence data
+     5. Builds comprehensive knowledge context with all 5 data sections
+     6. Sets rich metadata: gene, variant, hgvsC, hgvsP, acmgClassification, clinvarSignificance, gnomadFrequency, appliedRules, evidenceSummary
+   - **HGVS-only mode**: Shows HGVS notation, notes that genomic coordinates unavailable for auto-classification
+   - **Unknown format fallback**: Pure knowledge base search (original behavior)
+   - **Always supplements** with knowledge base gene/disease search (deduplication-aware)
+   - **Error handling**: ACMG pipeline failures fall through to KB-only mode gracefully
+   - Updated knowledge context prefix to reflect multi-source data integration
+
+3. **`src/lib/llm-service.ts`** — Enhanced variant_interpretation system prompt
+   - Added description of 4 data sources the LLM will receive (VEP, ClinVar, gnomAD, ACMG)
+   - Expanded response structure to 5 sections: basic info, ACMG classification with rule explanations, database cross-validation, clinical significance, recommendations
+   - Added "重要规则" section: must use real data from references, must explain each ACMG rule, must indicate when data is incomplete
+   - Instructs LLM to explain each applied ACMG rule in plain language
+
+**Data Flow:**
+```
+User message → Intent classifier (extracts geneSymbol + variantNotation)
+  → Variant parser (determines format: vcf/rsid/hgvs/unknown)
+  → [VCF/rsID only] VEP API → ClinVar API + gnomAD API (parallel) → ACMG classifier
+  → Knowledge base search (always, supplements with gene/disease info)
+  → Comprehensive knowledge context → LLM → Response + structured metadata
+```
+
+**Quality:**
+- ESLint: 0 errors, 0 warnings
+- Dev server: Compiles successfully, no errors
+- Graceful fallback: all external API failures caught, never crashes chat flow
+
+---
+## Task ID: 8 - Database Seed Data (ACMG)
+### Work Task
+Add ACMG-related seed data (thresholds, PM1 domains, datasource configs) to the existing seed file and push/seed to database.
+
+### Work Summary
+
+**File Modified: `prisma/seed.ts`**
+
+Added three new seed data sections to the existing seed file without breaking any existing data:
+
+1. **ACMG Thresholds** (Section 5) — 5 records:
+   - Global default (gene=null) with standard thresholds: BA1=0.05, BS1=0.0001, PM2=0.00001
+   - BRCA1: BA1=0.001, BS1=0.00005 (stricter due to high penetrance)
+   - TP53: BA1=0.0001, BS1=0.00001 (Li-Fraumeni, very strict)
+   - DMD: BA1=0.001, BS1=0.00005 (X-linked recessive)
+   - CFTR: BA1=0.01, BS1=0.0005 (CF common in Caucasian, looser thresholds)
+
+2. **PM1 Critical Functional Domains** (Section 6) — 14 records:
+   - BRCA1: RING domain (1-109), BRCT domain (1646-1859, critical=true)
+   - BRCA2: DNA-binding domain (2480-3185, critical=true)
+   - TP53: DNA-binding domain (102-292, critical=true), Tetramerization domain (323-356)
+   - DMD: Actin-binding (1-240), Rod (363-3662), C-terminal (3663-3866)
+   - NF1: GAP-related domain (1198-1530, critical=true)
+   - MYH7: Motor domain (178-779, critical=true)
+   - LMNA: Rod domain (23-382), Ig-fold domain (392-553)
+   - TSC1: Coiled-coil domain (719-998)
+   - TSC2: GAP domain (1517-1673, critical=true)
+
+3. **Data Source Configs** (Section 7) — 5 records:
+   - vep_api (api, enabled), clinvar_api (api, enabled), gnomad_api (api, enabled)
+   - hgmd_local (local_db, disabled), pm1_local (local_db, enabled)
+
+Also added cleanup for the three new tables (AcmgThreshold, Pm1Domain, DataSourceConfig) at the top of the seed file and updated the summary section.
+
+**Database Operations:**
+- `bun run db:push` — Schema already in sync
+- `bun run prisma db seed` — Successfully seeded all data (5 thresholds, 14 PM1 domains, 5 datasource configs)
+
+**Quality:** ESLint 0 errors
+
+---
+## Task ID: 9 - Data Source Configuration Frontend Panel
+### Work Task
+Create a frontend component for configuring data sources, and integrate it into the variant classification tab.
+
+### Work Summary
+
+**File Created: `src/components/variant/datasource-config-panel.tsx`**
+
+A 'use client' component that provides a complete data source management UI:
+- Fetches data source configs from `GET /api/datasources/config`
+- Displays each data source as a card with:
+  - Type icon (Globe for API, HardDrive for local_db, Database for file)
+  - Name (monospace font), type badge, sync status badge
+  - Description text, last sync time, error messages
+  - Enabled/disabled Switch toggle (calls `PUT /api/datasources/config`)
+- "初始化默认配置" button (calls `POST /api/datasources/config` with `{action: 'init_defaults'}`)
+- Loading skeleton state, empty state with guidance text
+- Sync status indicators: idle (muted), syncing (blue animated), success (emerald), failed (red)
+- Disabled data sources shown with reduced opacity
+- Uses existing shadcn/ui components: Card, Switch, Badge, Button, Skeleton
+- Matches RareHelper teal/emerald brand styling
+
+**File Modified: `src/components/variant/classification-panel.tsx`**
+
+Added a collapsible section at the bottom of the variant classification panel:
+- Toggle button with Settings icon + "数据源配置" label + chevron
+- Expands/collapses to show the DatasourceConfigPanel
+- Added `showDsConfig` state and `Settings` icon import
+- The config panel is always visible (not dependent on classification results)
+
+**Quality:** ESLint 0 errors, dev server compiles successfully
+
+---
+Task ID: 10
+Agent: main
+Task: 增强消息气泡组件 - 支持 ACMG 分类结果卡片渲染
+
+Work Log:
+- 重写 `VariantInterpretationCard` 组件，支持两种 metadata 格式：
+  - 新格式 (ACMG Pipeline): `acmgClassification`, `acmgClassificationLabel`, `appliedRules`, `evidenceSummary`, `clinvarSignificance`, `gnomadFrequency`, `hgvsC`, `hgvsP`, `consequence`, `impact`
+  - 旧格式 (LLM 生成): `gene`, `variant`, `classification`, `evidenceLevel`, `details`
+- 新增 ACMG 分类结果头部卡片：五级分类颜色编码 + 基因/HGVS 信息
+- 新增数据库信息网格：ClinVar 临床意义 Badge + gnomAD 等位基因频率 + 变异类型 + 影响等级
+- 新增已应用 ACMG 规则列表：按规则前缀自动分配颜色（PVS=极强/红, PS=强/橙, PM=中等/黄, PP=支持/蓝, BA=独立/紫, BS=强/橙）
+- 新增证据汇总面板：8 个证据维度的计数展示（致病4级 + 良性4级）
+- 修复 `Pm1DomainData` 类型缺少 `domainId` 字段（types.ts + classifier.ts）
+- 修复 `assessPM1` 规则中 `domain.domainId` 引用
+
+Stage Summary:
+- 消息气泡现在能完整渲染 ACMG 自动分类结果，包括分类级别、数据库来源、规则应用详情
+- 向后兼容旧的 LLM 生成格式
+- ESLint 0 errors 通过
+- 所有 10 个 Task 全部完成
