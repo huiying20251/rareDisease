@@ -85,3 +85,54 @@ model Disease {
   geneSymbols String?  @default("[]") // JSON: 关联基因符号
   prevalence  String?  // 发病率
 }
+
+// ==================== 文档知识库 ====================
+
+model Document {
+  id           String           @id @default(cuid())
+  filename     String           // 存储文件名
+  originalName String           // 原始文件名
+  mimeType     String           // MIME 类型
+  fileSize     Int              // 文件大小（字节）
+  documentType String           // pdf | xlsx | docx
+  status       String           @default("pending") // pending | processing | completed | failed
+  textContent  String?          // 完整提取文本
+  docMetadata  String?          @default("{}") // JSON: {pages, author, sheets, etc}
+  errorMessage String?          // 处理失败时的错误信息
+  uploadedAt   DateTime         @default(now())
+  processedAt  DateTime?
+  chunks       DocumentChunk[]
+
+  @@index([documentType])
+  @@index([status])
+}
+
+model DocumentChunk {
+  id           String   @id @default(cuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex   Int              // 0-based 位置
+  content      String   // 文本内容
+  tokenizedContent String? // jieba 分词后的文本（用于 FTS5）
+  charCount    Int              // 字符数
+  pageNumber   Int?             // PDF 页码
+  sheetName    String?          // Excel sheet 名
+  sectionTitle String?          // 章节标题
+  chunkMetadata String? @default("{}") // JSON: 扩展信息
+
+  @@index([documentId])
+}
+
+// ==================== 同义词/别名表 ====================
+
+model Synonym {
+  id        String   @id @default(cuid())
+  term      String   // 输入词/别名
+  canonical String   // 标准词/规范词
+  category  String   @default("general") // gene | disease | hpo | product | general
+  createdAt DateTime @default(now())
+
+  @@index([term])
+  @@index([canonical])
+  @@index([category])
+}

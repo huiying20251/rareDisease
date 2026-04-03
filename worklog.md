@@ -139,3 +139,124 @@ Update message-bubble component to render real structured data from API metadata
 - All structured data cards render dynamically from API metadata
 - Graceful degradation: if no metadata, only text content is shown (no empty cards)
 - Responsive: cards have max-height with scroll overflow
+
+---
+## Task ID: 5
+Agent: rag-service
+Task: Create synonym service and RAG retrieval service
+
+Work Log:
+- Read worklog.md and all dependency files (knowledge-service.ts, fts5-init.ts, jieba-service.ts, prisma/schema.prisma, db.ts) to understand existing types, functions, and data models
+- Created `src/lib/synonym-service.ts` with 4 exported functions:
+  - `getSynonyms(term)`: Queries Synonym table by exact match (case-insensitive) + prefix match, returns deduplicated `{ term, canonical, category }[]`
+  - `expandQuery(query)`: Tokenizes query with jieba `cut()`, looks up synonyms per token, returns space-separated expanded query string
+  - `buildSynonymSeedData()`: Generates synonym entries from existing structured data — Gene (geneSymbol + fullName), Disease (name + aliases JSON), HpoTerm (name + hpoId + synonyms JSON)
+  - `seedSynonyms(entries)`: Bulk inserts synonym data using `createMany` with `skipDuplicates`
+- Created `src/lib/rag-service.ts` with 3 exported functions and 1 exported type:
+  - `RAGResult` interface: `{ structured: { genes, diseases, hpoTerms, products }, documents: Fts5SearchResult[], ragContext: string }`
+  - `hybridSearch(query, options)`: L2 synonym expansion → jieba tokenization → FTS5 BM25 search, with optional document type filtering
+  - `buildRagContext(query, maxChunks)`: Calls hybridSearch, formats results as markdown with source citations (document name, page/sheet info), limited to maxChunks (default 8)
+  - `searchKnowledgeBase(query)`: Unified search using Promise.all to run structured searches (genes, diseases, HPO terms, products) and document search in parallel
+- Initialization guard `ensureInitialized()` ensures jieba + FTS5 are ready on first use
+- All functions have graceful error handling with fallback strategies
+- Server-side only modules (no 'use client', no browser APIs)
+
+Stage Summary:
+- Two new server-side service files created: synonym-service.ts and rag-service.ts
+- Synonym service provides L2 fuzzy matching via Synonym table lookups and seed data generation from existing Gene/Disease/HPO records
+- RAG service orchestrates L1 (FTS5 BM25) + L2 (synonym expansion) + structured DB queries in a unified `searchKnowledgeBase` API
+- ESLint: 0 new errors (pre-existing 1 error in jieba-service.ts is unrelated)
+- Dev server compiles successfully
+
+---
+## Task ID: 4
+Agent: document-service
+Task: Create document processing service
+
+Work Log:
+- Read worklog.md to understand project context (RareHelper genomics Q&A app)
+- Read prisma/schema.prisma to understand Document and DocumentChunk models
+- Read jieba-service.ts to understand tokenizeForFts5 and initJieba APIs
+- Created `src/lib/document-service.ts` with comprehensive document processing pipeline:
+  - **PDF parsing** (`parsePdf`): Uses `require('pdf-parse')` (CommonJS for Bun compat), splits text by `\f` form-feed into per-page arrays, falls back to single-page if no form-feeds found, extracts metadata (title, author, creator, producer, pageCount)
+  - **Excel parsing** (`parseExcel`): Uses `require('xlsx')` (CommonJS for Bun compat), reads all sheets via `XLSX.readFile`, converts each row to natural language description (e.g., "Gene: BRCA1, Mutation: c.5266dupC, ACMG: Pathogenic"), handles empty sheets gracefully
+  - **Smart text chunking** (`chunkText`):
+    - Config: chunkSize=2000 chars, overlap=15% (300 chars)
+    - Split priority: paragraphs (`\n\n`) → lines (`\n`) → sentence boundaries (Chinese/English punctuation)
+    - Table detection: checks for 3+ lines with `|` or 2+ tabs, converts to natural language via `tableToNaturalLanguage`
+    - Section title extraction: matches Chinese numbering (一二三), Markdown headers (#), numeric outlines (1. 1.1)
+    - Each chunk preserves pageNumber, sheetName, sectionTitle, isTable flag
+  - **Main pipeline** (`processDocument`):
+    - Updates status to 'processing' → parses file → chunks text → tokenizes with jieba (`tokenizeForFts5`) → batch saves chunks (50 per batch) → saves full text to `textContent` → sets status to 'completed' with `processedAt` timestamp
+    - Error handling: catches all errors, sets status to 'failed' with errorMessage
+  - **Re-processing** (`reprocessDocument`): Deletes all existing chunks, resets document state, re-runs `processDocument`
+  - **Helper** (`formatFileSize`): Converts bytes to human-readable format (B/KB/MB/GB/TB)
+- Added eslint-disable comments for required CommonJS imports
+- ESLint: 0 new errors in document-service.ts (pre-existing 1 error in jieba-service.ts is unrelated)
+
+Stage Summary:
+- Document processing pipeline ready for PDF and Excel files
+- Smart chunking with paragraph/heading awareness and table-to-NL conversion
+- jieba tokenization integrated for FTS5 indexing
+- Batch chunk creation for performance (50 per batch)
+- Full error handling with status tracking (pending → processing → completed/failed)
+
+---
+## Task ID: 8 - Sidebar Tabs + Knowledge Base Panel + Chat Enhancements
+### Work Task
+Add sidebar dual-tab navigation (Conversations / Knowledge Base), document upload UI, and chat interaction enhancements.
+
+### Work Summary
+
+**Files Created (1):**
+
+1. **`src/components/chat/knowledge-panel.tsx`** — Knowledge Base management panel
+   - Document list with status indicators (pending/processing/completed/failed)
+   - Drag-and-drop file upload zone supporting PDF, Excel, CSV (max 50MB)
+   - File picker as fallback for non-drag-drop upload
+   - Document deletion with hover-reveal trash button
+   - Auto-polling (3s interval) for documents in processing state
+   - Stats bar showing total documents and text chunks count
+   - "Initialize Knowledge Base Index" button for FTS5 rebuild
+   - Graceful error handling for all API calls
+
+**Files Modified (4):**
+
+2. **`src/app/page.tsx`** — Major updates
+   - Added `SidebarShell` component with dual-tab navigation (对话 / 知识库)
+   - Tab state management (`sidebarTab`)
+   - `handleRegenerate`: Removes last assistant message and resends last user query
+   - Wired `onDeleteConversation` prop to `ConversationSidebar`
+   - Wired `onRegenerate` prop to `MessageList`
+   - Passed `KnowledgePanel` as sidebar content for "知识库" tab
+
+3. **`src/components/chat/conversation-sidebar.tsx`** — Enhanced
+   - Added `onDeleteConversation` prop for deleting conversations
+   - Added `isEmbedded` prop to suppress header when used inside SidebarShell
+   - Delete button appears on hover with opacity transition
+   - Removed header section when embedded (header now in SidebarShell)
+
+4. **`src/components/chat/message-bubble.tsx`** — Enhanced
+   - Added `CopyButton` component with clipboard API + fallback
+   - Added copy-to-clipboard for all assistant messages (hover reveal)
+   - Added regenerate button on last assistant message (hover reveal)
+   - Visual feedback: green checkmark after successful copy
+   - Group hover effect for action buttons
+
+5. **`src/components/chat/message-list.tsx`** — Enhanced
+   - Added `onRegenerate` prop
+   - Identifies last assistant message for regeneration
+   - Only shows regenerate button on last assistant message
+
+6. **`src/lib/jieba-service.ts`** — Critical fix
+   - Replaced static `import nodejieba from 'nodejieba'` with dynamic `getJieba()` function
+   - Uses variable-based `require('nodejieba')` to avoid Turbopack static resolution
+   - Graceful fallback to regex-based tokenization when nodejieba unavailable
+   - All functions (cut, cutForSearch, extractKeywords, tokenizeForFts5, tokenizeQuery) use fallback
+   - Eliminated the compilation error caused by missing native module
+
+**Quality:**
+- ESLint: 0 errors, 0 warnings (all pre-existing issues resolved)
+- Dev server: Compiled successfully before temporary config crash (resolved)
+- All new components are responsive (mobile-first)
+- Consistent with existing brand color system (teal/emerald)

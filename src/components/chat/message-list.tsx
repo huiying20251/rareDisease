@@ -10,12 +10,14 @@ interface MessageListProps {
   messages: Message[]
   isLoading: boolean
   onSuggestionClick: (text: string) => void
+  onRegenerate?: () => void
 }
 
 export function MessageList({
   messages,
   isLoading,
   onSuggestionClick,
+  onRegenerate,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -31,11 +33,26 @@ export function MessageList({
     )
   }
 
+  // Find the last assistant message index for regeneration
+  const lastAssistantIndex = messages.reduce(
+    (lastIdx, msg, idx) => (msg.role === 'assistant' ? idx : lastIdx),
+    -1
+  )
+
   return (
     <ScrollArea className="flex-1 chat-scrollbar">
       <div className="flex flex-col">
-        {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} />
+        {messages.map((message, index) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            onRegenerate={
+              index === lastAssistantIndex && !isLoading && onRegenerate
+                ? onRegenerate
+                : undefined
+            }
+            isLoading={isLoading}
+          />
         ))}
         {isLoading && (
           <div className="flex gap-3 px-4 py-3">

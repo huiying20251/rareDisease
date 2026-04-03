@@ -3,9 +3,77 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { ChatLayout } from '@/components/chat/chat-layout'
 import { ConversationSidebar, type Conversation } from '@/components/chat/conversation-sidebar'
+import { KnowledgePanel } from '@/components/chat/knowledge-panel'
 import { MessageList } from '@/components/chat/message-list'
 import { ChatInput } from '@/components/chat/chat-input'
 import type { Message } from '@/components/chat/message-bubble'
+
+// ==================== Sidebar Shell with Tabs ====================
+
+import { MessageSquare, Database, Dna } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Separator } from '@/components/ui/separator'
+
+function SidebarShell({
+  activeTab,
+  onTabChange,
+  children,
+}: {
+  activeTab: 'conversations' | 'knowledge'
+  onTabChange: (tab: 'conversations' | 'knowledge') => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex h-full flex-col bg-background border-r border-border">
+      {/* Header with Logo + Tabs */}
+      <div className="px-4 pt-4 pb-0">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-brand/10">
+            <Dna className="size-5 text-brand" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-bold tracking-tight text-foreground truncate">
+              RareHelper
+            </h2>
+            <p className="text-[11px] text-muted-foreground">罕见病智能解读助手</p>
+          </div>
+        </div>
+        {/* Tab Bar */}
+        <div className="flex rounded-lg bg-muted/50 p-0.5">
+          <button
+            onClick={() => onTabChange('conversations')}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all',
+              activeTab === 'conversations'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <MessageSquare className="size-3.5" />
+            对话
+          </button>
+          <button
+            onClick={() => onTabChange('knowledge')}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all',
+              activeTab === 'knowledge'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <Database className="size-3.5" />
+            知识库
+          </button>
+        </div>
+      </div>
+      <Separator className="mt-3" />
+      {/* Content */}
+      <div className="flex-1 flex flex-col min-h-0">
+        {children}
+      </div>
+    </div>
+  )
+}
 
 export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -15,6 +83,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
+  const [sidebarTab, setSidebarTab] = useState<'conversations' | 'knowledge'>('conversations')
   const isSendingRef = useRef(false)
 
   const currentMessages = activeConversationId ? (messagesMap[activeConversationId] ?? []) : []
@@ -241,6 +310,25 @@ export default function Home() {
     isSendingRef.current = false
   }, [])
 
+  // ===== Regenerate last response =====
+  const handleRegenerate = useCallback(() => {
+    if (!activeConversationId || isLoading || !currentMessages.length) return
+    // Find the last user message to resend
+    const lastUserMsg = [...currentMessages].reverse().find((m) => m.role === 'user')
+    if (!lastUserMsg) return
+    // Remove the last assistant message
+    setMessagesMap((prev) => {
+      const msgs = [...(prev[activeConversationId] ?? [])]
+      const lastIdx = msgs.length - 1
+      if (lastIdx >= 0 && msgs[lastIdx].role === 'assistant') {
+        msgs.splice(lastIdx, 1)
+      }
+      return { ...prev, [activeConversationId]: msgs }
+    })
+    // Resend the last user message
+    handleSendMessage(lastUserMsg.content)
+  }, [activeConversationId, currentMessages, isLoading, handleSendMessage])
+
   return (
     <ChatLayout
       sidebarOpen={sidebarOpen}
@@ -248,18 +336,27 @@ export default function Home() {
       onMobileToggleSidebar={() => setMobileSidebarOpen((prev) => !prev)}
       mobileSidebarOpen={mobileSidebarOpen}
       sidebarContent={
-        <ConversationSidebar
-          conversations={conversations}
-          activeConversationId={activeConversationId}
-          onSelectConversation={handleSelectConversation}
-          onNewConversation={handleNewConversation}
-        />
+        <SidebarShell activeTab={sidebarTab} onTabChange={setSidebarTab}>
+          {sidebarTab === 'conversations' ? (
+            <ConversationSidebar
+              conversations={conversations}
+              activeConversationId={activeConversationId}
+              onSelectConversation={handleSelectConversation}
+              onNewConversation={handleNewConversation}
+              onDeleteConversation={handleDeleteConversation}
+              isEmbedded
+            />
+          ) : (
+            <KnowledgePanel />
+          )}
+        </SidebarShell>
       }
     >
       <MessageList
         messages={currentMessages}
         isLoading={isLoading}
         onSuggestionClick={handleSuggestionClick}
+        onRegenerate={handleRegenerate}
       />
       <ChatInput
         onSend={handleSendMessage}

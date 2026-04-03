@@ -1,11 +1,13 @@
 'use client'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Bot, User, ShieldAlert, Search, Package, Heart } from 'lucide-react'
+import { Bot, User, ShieldAlert, Search, Package, Heart, Copy, Check, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { useState, useCallback } from 'react'
 
 // ==================== Types ====================
 
@@ -25,6 +27,9 @@ export interface Message {
 
 interface MessageBubbleProps {
   message: Message
+  onCopy?: (content: string) => void
+  onRegenerate?: () => void
+  isLoading?: boolean
 }
 
 // ==================== Helpers ====================
@@ -320,9 +325,44 @@ function DiseaseRecommendationContent({ content, metadata }: { content: string; 
   )
 }
 
+// ==================== Copy Button ====================
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Fallback for older browsers
+      const textarea = document.createElement('textarea')
+      textarea.value = content
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }, [content])
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={handleCopy}
+      className="size-7 text-muted-foreground hover:text-foreground"
+    >
+      {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+    </Button>
+  )
+}
+
 // ==================== Message Bubble ====================
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onCopy, onRegenerate, isLoading }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const metadata = parseMetadata(message.metadata)
 
@@ -343,7 +383,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   return (
     <div
-      className={cn('flex gap-3 px-4 py-3', isUser ? 'flex-row-reverse' : 'flex-row')}
+      className={cn('group flex gap-3 px-4 py-3', isUser ? 'flex-row-reverse' : 'flex-row')}
     >
       <Avatar
         className={cn(
@@ -378,9 +418,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         >
           {renderContent()}
         </div>
-        <span className="px-1 text-[10px] text-muted-foreground">
-          {formatTime(message.createdAt)}
-        </span>
+        <div className="flex items-center gap-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="text-[10px] text-muted-foreground">
+            {formatTime(message.createdAt)}
+          </span>
+          {!isUser && (
+            <div className="flex items-center gap-0.5 ml-1">
+              <CopyButton content={message.content} />
+              {onRegenerate && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onRegenerate}
+                  disabled={isLoading}
+                  className="size-7 text-muted-foreground hover:text-foreground"
+                >
+                  <RefreshCw className={cn('size-3.5', isLoading && 'animate-spin')} />
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
