@@ -260,3 +260,35 @@ Add sidebar dual-tab navigation (Conversations / Knowledge Base), document uploa
 - Dev server: Compiled successfully before temporary config crash (resolved)
 - All new components are responsive (mobile-first)
 - Consistent with existing brand color system (teal/emerald)
+
+---
+Task ID: 1
+Agent: main
+Task: 实现 ACMG 变异致病性分类系统 - 参考 HerediClassify 架构
+
+Work Log:
+- 阅读 HerediClassify GitHub 仓库全部源码（36个Python文件），理解其模块化ACMG规则引擎架构
+- 阅读用户上传的 main.py（变异解读主入口）和 normalizer.py（变异标准化）代码
+- 更新 Prisma Schema，新增 6 个模型：DataSourceConfig, VariantAnnotation, HgmdImport, Pm1Domain, AcmgThreshold
+- 实现完整 ACMG 分类引擎（TypeScript）：
+  - types.ts: 类型定义（28个类型/枚举/接口）
+  - rules.ts: 18条 ACMG 规则（PVS1, PS1, PS3, PS4, PM1, PM2, PM4, PM5, PP1-PP4, BA1, BS1, BS2, BP1, BP3, BP4, BP7）
+  - schemata.ts: 分类组合逻辑（5个分类级别的组合规则 + 冲突检测）
+  - classifier.ts: 分类器主入口（阈值管理、PM1域查询、结果缓存）
+  - index.ts: 统一导出
+- 实现 3 个外部 API 客户端：
+  - vep-client.ts: Ensembl VEP REST API（变异注释 + gnomAD频率 + 功能预测）
+  - clinvar-client.ts: NCBI ClinVar API + gnomAD Browser API
+- 创建 API 路由：
+  - /api/variant/classify: 完整分类流程（VEP→ClinVar→gnomAD→HGMD→ACMG规则→结果）
+  - /api/datasources/config: 数据源配置管理（GET/PUT/POST）
+- 创建前端组件 VariantClassificationPanel（分类表单 + 结果展示）
+- 集成到侧边栏第三个Tab"变异解读"
+
+Stage Summary:
+- 完整实现了参考 HerediClassify 的 ACMG 分类引擎，使用 TypeScript 重写
+- 接入了 ClinVar API、gnomAD API、VEP API 三个外部数据源
+- 支持本地 HGMD 数据库和 PM1 功能域数据库
+- 提供了可配置的 ACMG 阈值系统（支持按基因自定义）
+- 前端组件支持 VCF/rsID 两种输入格式
+- ESLint 零错误通过

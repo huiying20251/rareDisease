@@ -10,7 +10,8 @@ import type { Message } from '@/components/chat/message-bubble'
 
 // ==================== Sidebar Shell with Tabs ====================
 
-import { MessageSquare, Database, Dna } from 'lucide-react'
+import { MessageSquare, Database, Dna, FlaskConical } from 'lucide-react'
+import { VariantClassificationPanel } from '@/components/variant/classification-panel'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 
@@ -19,8 +20,8 @@ function SidebarShell({
   onTabChange,
   children,
 }: {
-  activeTab: 'conversations' | 'knowledge'
-  onTabChange: (tab: 'conversations' | 'knowledge') => void
+  activeTab: 'conversations' | 'knowledge' | 'variant'
+  onTabChange: (tab: 'conversations' | 'knowledge' | 'variant') => void
   children: React.ReactNode
 }) {
   return (
@@ -64,6 +65,18 @@ function SidebarShell({
             <Database className="size-3.5" />
             知识库
           </button>
+          <button
+            onClick={() => onTabChange('variant')}
+            className={cn(
+              'flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all',
+              activeTab === 'variant'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            <FlaskConical className="size-3.5" />
+            变异解读
+          </button>
         </div>
       </div>
       <Separator className="mt-3" />
@@ -83,7 +96,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
-  const [sidebarTab, setSidebarTab] = useState<'conversations' | 'knowledge'>('conversations')
+  const [sidebarTab, setSidebarTab] = useState<'conversations' | 'knowledge' | 'variant'>('conversations')
   const isSendingRef = useRef(false)
 
   const currentMessages = activeConversationId ? (messagesMap[activeConversationId] ?? []) : []
@@ -346,8 +359,10 @@ export default function Home() {
               onDeleteConversation={handleDeleteConversation}
               isEmbedded
             />
-          ) : (
+          ) : sidebarTab === 'knowledge' ? (
             <KnowledgePanel />
+          ) : (
+            <VariantClassificationPanel />
           )}
         </SidebarShell>
       }

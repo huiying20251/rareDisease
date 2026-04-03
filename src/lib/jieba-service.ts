@@ -20,12 +20,9 @@ function getJieba(): any | null {
   jiebaLoadAttempted = true
 
   try {
-    // Dynamic require to avoid Turbopack static resolution
-    const mod = 'node'
-    const name = 'jieba'
-    const modPath = `${mod === 'node' ? '' : ''}${name}`
+    // Dynamic require for native nodejieba module to avoid Turbopack static analysis
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    jiebaModule = require(modPath)
+    jiebaModule = require('nodejieba')
   } catch {
     console.warn('nodejieba is not available. Using fallback tokenization.')
     jiebaModule = null

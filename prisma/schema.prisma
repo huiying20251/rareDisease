@@ -136,3 +136,148 @@ model Synonym {
   @@index([canonical])
   @@index([category])
 }
+
+// ==================== 变异解读系统 ====================
+
+// 数据源配置
+model DataSourceConfig {
+  id          String   @id @default(cuid())
+  name        String   @unique   // 数据源名称: clinvar_api, gnomad_api, vep_api, hgmd_local, pm1_local
+  sourceType  String              // api | local_db | file
+  enabled     Boolean  @default(true)
+  config      String   @default("{}") // JSON: 连接配置
+  description String?
+  lastSyncAt  DateTime?
+  syncStatus  String   @default("idle") // idle | syncing | success | failed
+  syncError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 变异注释结果缓存
+model VariantAnnotation {
+  id              String   @id @default(cuid())
+  chromosome      String
+  position        Int
+  reference       String
+  alternate       String
+  genomeBuild     String   @default("GRCh38")
+  gene            String?
+  transcript      String?
+  refseqTranscript String?
+  hgvsC           String?
+  hgvsP           String?
+  hgvsG           String?
+  rsId            String?
+  consequence     String?
+  impact          String?
+  maneStatus      String?
+  // ClinVar
+  clinvarId       String?
+  clinvarSignificance String?
+  clinvarReviewStatus String?
+  clinvarDiseases String?  @default("[]") // JSON
+  clinvarLastEval String?
+  // gnomAD
+  gnomadPopmaxFreq Float?
+  gnomadPopmaxPop  String?
+  gnomadAfGlobal   Float?
+  gnomadAfAfr      Float?
+  gnomadAfAmr      Float?
+  gnomadAfEas      Float?
+  gnomadAfNfe      Float?
+  gnomadAfSas      Float?
+  gnomadHomCount   Int?
+  gnomadHemiCount  Int?
+  // HGMD
+  hgmdAccession    String?
+  hgmdClass        String?  // DM | DM? | DP | DFP | RCV
+  hgmdDescription  String?
+  hgmdGene         String?
+  hgmdDisease      String?
+  hgmdPubmedId     String?
+  hgmdMutationType String?
+  // VEP 额外注释
+  vepSiftScore     Float?
+  vepPolyphenScore Float?
+  vepCaddScore     Float?
+  vepRevelScore    Float?
+  vepSpliceAiDsMax Float?
+  vepSpliceAiAgMax Float?
+  // ACMG 自动分类
+  acmgClassification String?  // Pathogenic | Likely Pathogenic | VUS | Likely Benign | Benign
+  acmgRulesApplied  String?  @default("[]") // JSON: [{rule, status, strength, comment}]
+  acmgClassifiedAt  DateTime?
+  // 元数据
+  dataSources     String?  @default("[]") // JSON: 数据来源列表
+  rawJson         String?  // 原始JSON缓存
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([chromosome, position, reference, alternate, genomeBuild])
+  @@index([gene])
+  @@index([rsId])
+  @@index([clinvarId])
+  @@index([hgmdAccession])
+}
+
+// 本地 HGMD 导入记录
+model HgmdImport {
+  id            String   @id @default(cuid())
+  accession     String   @unique // HGMD ID: CD000001
+  classType     String   // DM | DM? | DP | DFP | RCV
+  variant       String   // 变异描述
+  gene          String
+  disease       String?
+  description   String?
+  pubmedId      String?
+  mutationType  String?
+  chromosome    String?
+  position      Int?
+  reference     String?
+  alternate     String?
+  importedAt    DateTime @default(now())
+}
+
+// PM1 蛋白结构域数据库
+model Pm1Domain {
+  id            String   @id @default(cuid())
+  gene          String
+  domainName    String
+  domainSource  String   // Pfam | InterPro | UniProt | SMART
+  domainId      String?  // 域ID
+  startPos      Int      // 起始氨基酸位置
+  endPos        Int      // 结束氨基酸位置
+  criticalRegion Boolean @default(false) // 是否为关键区域
+  description   String?
+  evidence      String?  @default("[]") // JSON: 证据来源
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([gene])
+  @@index([domainSource])
+}
+
+// ACMG 阈值配置（可按基因自定义）
+model AcmgThreshold {
+  id              String   @id @default(cuid())
+  gene            String?  // 基因符号，null表示全局默认
+  thresholdBa1    Float    @default(0.05)
+  thresholdBa1Absolute Int  @default(20)
+  thresholdBs1    Float    @default(0.0001)
+  thresholdBs1Absolute Int  @default(5)
+  thresholdBs1Supporting Float @default(0.00001)
+  thresholdBs2    Float    @default(0.001)
+  thresholdBs2Supporting Float @default(0.0001)
+  thresholdPm2    Float    @default(0.00001)
+  thresholdPm2Supporting Boolean @default(true) // PM2使用supporting等级
+  thresholdRevelPathogenic Float @default(0.732)
+  thresholdRevelBenign Float   @default(0.16)
+  thresholdSpliceAiPathogenic Float @default(0.2)
+  thresholdSpliceAiBenign Float   @default(0.01)
+  thresholdProteinLenDiff Float  @default(0.1) // PVS1蛋白长度变化百分比阈值
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([gene])
+}
