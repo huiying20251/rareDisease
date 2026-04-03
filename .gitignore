@@ -52,3 +52,16 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Database files
+db/*.db
+db/*.db-journal
+
+# System / runtime files
+.accesslog
+.config
+.stats
+.zscripts/
+
+# Upload scripts
+/upload/
