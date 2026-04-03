@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 对话管理 ====================
+
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String   @default("新对话")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // user | assistant
+  content        String   // 文本内容
+  contentType    String   @default("text") // text | variant_interpretation | hpo_matching | product_recommendation | disease_recommendation
+  metadata       String?  @default("{}") // JSON 格式的结构化数据
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+// ==================== 产品知识库 ====================
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String   // 产品名称
+  category    String   // 产品类别：测序服务、Panel、WES、WGS、CNV分析、Sanger验证等
+  description String   // 产品描述
+  features    String?  @default("[]") // JSON: 产品特性列表
+  keywords    String?  @default("[]") // JSON: 搜索关键词
+  indications String?  @default("[]") // JSON: 适用症/适应症
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ==================== HPO 表型词条 ====================
+
+model HpoTerm {
+  id          String @id @default(cuid())
+  hpoId       String @unique // HP:0000118
+  name        String // 表型名称
+  category    String? // 表型大类：生长发育、神经系统、心血管系统、骨骼系统等
+  definition  String? // 定义
+  keywords    String? @default("[]") // JSON: 中文关键词，用于匹配
+  synonyms    String? @default("[]") // JSON: 同义词
+}
+
+// ==================== 基因信息 ====================
+
+model Gene {
+  id          String   @id @default(cuid())
+  geneSymbol  String   @unique // 基因符号：BRCA1
+  fullName    String?  // 全名
+  description String?  // 描述
+  omimId      String?  // OMIM ID
+  hgncId      String?  // HGNC ID
+  associatedDiseases String? @default("[]") // JSON: 关联疾病列表
+  phenotypeIds String?  @default("[]") // JSON: 关联 HPO ID 列表
+}
+
+// ==================== 疾病信息 ====================
+
+model Disease {
+  id          String   @id @default(cuid())
+  omimId      String?  @unique // OMIM 编号
+  name        String   // 疾病名称
+  aliases     String?  @default("[]") // JSON: 别名
+  description String?  // 描述
+  inheritance String?  @default("[]") // JSON: 遗传方式：常染色体显性、常染色体隐性、X连锁等
+  phenotypeIds String?  @default("[]") // JSON: 关联 HPO ID 列表
+  geneSymbols String?  @default("[]") // JSON: 关联基因符号
+  prevalence  String?  // 发病率
+}
