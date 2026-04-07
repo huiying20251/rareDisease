@@ -1,0 +1,283 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 对话管理 ====================
+
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String   @default("新对话")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // user | assistant
+  content        String   // 文本内容
+  contentType    String   @default("text") // text | variant_interpretation | hpo_matching | product_recommendation | disease_recommendation
+  metadata       String?  @default("{}") // JSON 格式的结构化数据
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+// ==================== 产品知识库 ====================
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String   // 产品名称
+  category    String   // 产品类别：测序服务、Panel、WES、WGS、CNV分析、Sanger验证等
+  description String   // 产品描述
+  features    String?  @default("[]") // JSON: 产品特性列表
+  keywords    String?  @default("[]") // JSON: 搜索关键词
+  indications String?  @default("[]") // JSON: 适用症/适应症
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ==================== HPO 表型词条 ====================
+
+model HpoTerm {
+  id          String @id @default(cuid())
+  hpoId       String @unique // HP:0000118
+  name        String // 表型名称
+  category    String? // 表型大类：生长发育、神经系统、心血管系统、骨骼系统等
+  definition  String? // 定义
+  keywords    String? @default("[]") // JSON: 中文关键词，用于匹配
+  synonyms    String? @default("[]") // JSON: 同义词
+}
+
+// ==================== 基因信息 ====================
+
+model Gene {
+  id          String   @id @default(cuid())
+  geneSymbol  String   @unique // 基因符号：BRCA1
+  fullName    String?  // 全名
+  description String?  // 描述
+  omimId      String?  // OMIM ID
+  hgncId      String?  // HGNC ID
+  associatedDiseases String? @default("[]") // JSON: 关联疾病列表
+  phenotypeIds String?  @default("[]") // JSON: 关联 HPO ID 列表
+}
+
+// ==================== 疾病信息 ====================
+
+model Disease {
+  id          String   @id @default(cuid())
+  omimId      String?  @unique // OMIM 编号
+  name        String   // 疾病名称
+  aliases     String?  @default("[]") // JSON: 别名
+  description String?  // 描述
+  inheritance String?  @default("[]") // JSON: 遗传方式：常染色体显性、常染色体隐性、X连锁等
+  phenotypeIds String?  @default("[]") // JSON: 关联 HPO ID 列表
+  geneSymbols String?  @default("[]") // JSON: 关联基因符号
+  prevalence  String?  // 发病率
+}
+
+// ==================== 文档知识库 ====================
+
+model Document {
+  id           String           @id @default(cuid())
+  filename     String           // 存储文件名
+  originalName String           // 原始文件名
+  mimeType     String           // MIME 类型
+  fileSize     Int              // 文件大小（字节）
+  documentType String           // pdf | xlsx | docx
+  status       String           @default("pending") // pending | processing | completed | failed
+  textContent  String?          // 完整提取文本
+  docMetadata  String?          @default("{}") // JSON: {pages, author, sheets, etc}
+  errorMessage String?          // 处理失败时的错误信息
+  uploadedAt   DateTime         @default(now())
+  processedAt  DateTime?
+  chunks       DocumentChunk[]
+
+  @@index([documentType])
+  @@index([status])
+}
+
+model DocumentChunk {
+  id           String   @id @default(cuid())
+  documentId   String
+  document     Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex   Int              // 0-based 位置
+  content      String   // 文本内容
+  tokenizedContent String? // jieba 分词后的文本（用于 FTS5）
+  charCount    Int              // 字符数
+  pageNumber   Int?             // PDF 页码
+  sheetName    String?          // Excel sheet 名
+  sectionTitle String?          // 章节标题
+  chunkMetadata String? @default("{}") // JSON: 扩展信息
+
+  @@index([documentId])
+}
+
+// ==================== 同义词/别名表 ====================
+
+model Synonym {
+  id        String   @id @default(cuid())
+  term      String   // 输入词/别名
+  canonical String   // 标准词/规范词
+  category  String   @default("general") // gene | disease | hpo | product | general
+  createdAt DateTime @default(now())
+
+  @@index([term])
+  @@index([canonical])
+  @@index([category])
+}
+
+// ==================== 变异解读系统 ====================
+
+// 数据源配置
+model DataSourceConfig {
+  id          String   @id @default(cuid())
+  name        String   @unique   // 数据源名称: clinvar_api, gnomad_api, vep_api, hgmd_local, pm1_local
+  sourceType  String              // api | local_db | file
+  enabled     Boolean  @default(true)
+  config      String   @default("{}") // JSON: 连接配置
+  description String?
+  lastSyncAt  DateTime?
+  syncStatus  String   @default("idle") // idle | syncing | success | failed
+  syncError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// 变异注释结果缓存
+model VariantAnnotation {
+  id              String   @id @default(cuid())
+  chromosome      String
+  position        Int
+  reference       String
+  alternate       String
+  genomeBuild     String   @default("GRCh38")
+  gene            String?
+  transcript      String?
+  refseqTranscript String?
+  hgvsC           String?
+  hgvsP           String?
+  hgvsG           String?
+  rsId            String?
+  consequence     String?
+  impact          String?
+  maneStatus      String?
+  // ClinVar
+  clinvarId       String?
+  clinvarSignificance String?
+  clinvarReviewStatus String?
+  clinvarDiseases String?  @default("[]") // JSON
+  clinvarLastEval String?
+  // gnomAD
+  gnomadPopmaxFreq Float?
+  gnomadPopmaxPop  String?
+  gnomadAfGlobal   Float?
+  gnomadAfAfr      Float?
+  gnomadAfAmr      Float?
+  gnomadAfEas      Float?
+  gnomadAfNfe      Float?
+  gnomadAfSas      Float?
+  gnomadHomCount   Int?
+  gnomadHemiCount  Int?
+  // HGMD
+  hgmdAccession    String?
+  hgmdClass        String?  // DM | DM? | DP | DFP | RCV
+  hgmdDescription  String?
+  hgmdGene         String?
+  hgmdDisease      String?
+  hgmdPubmedId     String?
+  hgmdMutationType String?
+  // VEP 额外注释
+  vepSiftScore     Float?
+  vepPolyphenScore Float?
+  vepCaddScore     Float?
+  vepRevelScore    Float?
+  vepSpliceAiDsMax Float?
+  vepSpliceAiAgMax Float?
+  // ACMG 自动分类
+  acmgClassification String?  // Pathogenic | Likely Pathogenic | VUS | Likely Benign | Benign
+  acmgRulesApplied  String?  @default("[]") // JSON: [{rule, status, strength, comment}]
+  acmgClassifiedAt  DateTime?
+  // 元数据
+  dataSources     String?  @default("[]") // JSON: 数据来源列表
+  rawJson         String?  // 原始JSON缓存
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([chromosome, position, reference, alternate, genomeBuild])
+  @@index([gene])
+  @@index([rsId])
+  @@index([clinvarId])
+  @@index([hgmdAccession])
+}
+
+// 本地 HGMD 导入记录
+model HgmdImport {
+  id            String   @id @default(cuid())
+  accession     String   @unique // HGMD ID: CD000001
+  classType     String   // DM | DM? | DP | DFP | RCV
+  variant       String   // 变异描述
+  gene          String
+  disease       String?
+  description   String?
+  pubmedId      String?
+  mutationType  String?
+  chromosome    String?
+  position      Int?
+  reference     String?
+  alternate     String?
+  importedAt    DateTime @default(now())
+}
+
+// PM1 蛋白结构域数据库
+model Pm1Domain {
+  id            String   @id @default(cuid())
+  gene          String
+  domainName    String
+  domainSource  String   // Pfam | InterPro | UniProt | SMART
+  domainId      String?  // 域ID
+  startPos      Int      // 起始氨基酸位置
+  endPos        Int      // 结束氨基酸位置
+  criticalRegion Boolean @default(false) // 是否为关键区域
+  description   String?
+  evidence      String?  @default("[]") // JSON: 证据来源
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([gene])
+  @@index([domainSource])
+}
+
+// ACMG 阈值配置（可按基因自定义）
+model AcmgThreshold {
+  id              String   @id @default(cuid())
+  gene            String?  // 基因符号，null表示全局默认
+  thresholdBa1    Float    @default(0.05)
+  thresholdBa1Absolute Int  @default(20)
+  thresholdBs1    Float    @default(0.0001)
+  thresholdBs1Absolute Int  @default(5)
+  thresholdBs1Supporting Float @default(0.00001)
+  thresholdBs2    Float    @default(0.001)
+  thresholdBs2Supporting Float @default(0.0001)
+  thresholdPm2    Float    @default(0.00001)
+  thresholdPm2Supporting Boolean @default(true) // PM2使用supporting等级
+  thresholdRevelPathogenic Float @default(0.732)
+  thresholdRevelBenign Float   @default(0.16)
+  thresholdSpliceAiPathogenic Float @default(0.2)
+  thresholdSpliceAiBenign Float   @default(0.01)
+  thresholdProteinLenDiff Float  @default(0.1) // PVS1蛋白长度变化百分比阈值
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([gene])
+}
